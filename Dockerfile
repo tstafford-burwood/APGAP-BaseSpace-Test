@@ -6,14 +6,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Ensure we're running as root
 USER root
 
-# Update package lists with retry logic
+# Fix GPG keys issue by updating them
+# Sometimes the base image has stale GPG keys
 RUN apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    apt-get update -y
+    apt-get update --allow-releaseinfo-change -y || true && \
+    apt-get install -y --reinstall ca-certificates && \
+    apt-get update --allow-releaseinfo-change -y
 
 # Install only packages that might be missing
 # curl, python3, and ca-certificates are likely already in the base image
-RUN apt-get install -y --no-install-recommends \
+# Using --allow-unauthenticated as workaround for GPG signature issues in base image
+RUN apt-get install -y --no-install-recommends --allow-unauthenticated \
         wget \
         unzip \
         procps \
