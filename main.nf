@@ -171,7 +171,8 @@ process TRANSFER_BS_TO_GCS {
     fi
     
     # Clean the secret value (remove leading/trailing whitespace and newlines)
-    BASESPACE_API_KEY=\$(echo "\$SECRET_OUTPUT" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # Use xargs to trim whitespace (simpler and more reliable)
+    BASESPACE_API_KEY=\$(echo "\$SECRET_OUTPUT" | tr -d '\n\r' | xargs)
     echo "✓ Secret retrieved successfully (length: \${#BASESPACE_API_KEY} characters)"
     echo ""
     
