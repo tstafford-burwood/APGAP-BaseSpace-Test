@@ -85,7 +85,7 @@ The workflow modification is very similar, just use `BASESPACE_API_KEY` instead:
 
 ```nextflow
 process TRANSFER_BS_TO_GCS {
-    container 'us-central1-docker.pkg.dev/asu-ap-gap-data-opstest-18c2/bs-gcs/client:latest'
+    container 'us-central1-docker.pkg.dev/asu-ap-gap-data-opstest-18c2/bs-gcs2/client:latest'
     
     input:
     tuple val(bs_file_id), val(gcs_output_uri)

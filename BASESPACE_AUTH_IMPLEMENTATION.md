@@ -110,7 +110,7 @@ workflow {
 }
 
 process TRANSFER_BS_TO_GCS {
-    container 'us-central1-docker.pkg.dev/asu-ap-gap-data-opstest-18c2/bs-gcs/client:latest'
+    container 'us-central1-docker.pkg.dev/asu-ap-gap-data-opstest-18c2/bs-gcs2/client:latest'
     
     input:
     tuple val(bs_file_id), val(gcs_output_uri)
@@ -191,7 +191,7 @@ Instead of retrieving in the script, you can configure the secret as an environm
 
 ```nextflow
 process TRANSFER_BS_TO_GCS {
-    container 'us-central1-docker.pkg.dev/asu-ap-gap-data-opstest-18c2/bs-gcs/client:latest'
+    container 'us-central1-docker.pkg.dev/asu-ap-gap-data-opstest-18c2/bs-gcs2/client:latest'
     
     // Token is automatically available via environment variable
     // No need to retrieve in script if configured in Seqera
