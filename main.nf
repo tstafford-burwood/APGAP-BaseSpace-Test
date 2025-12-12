@@ -194,31 +194,24 @@ process TRANSFER_BS_TO_GCS {
     echo "Key preview (first 10 chars): \${BASESPACE_API_KEY:0:10}..."
     echo ""
     
-    # Verify BaseSpace authentication
+    # Verify BaseSpace authentication using REST API
     echo "=== Verifying BaseSpace Authentication ==="
-    echo "Testing BaseSpace API key..."
+    echo "Testing BaseSpace API key with REST API..."
     
-    # Try with environment variable first (most common method)
-    WHOAMI_OUTPUT=\$(bs auth whoami 2>&1)
-    WHOAMI_EXIT=\$?
+    # Test authentication by calling the current user endpoint
+    AUTH_TEST=\$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer \$BASESPACE_API_KEY" \
+        "https://api.basespace.illumina.com/v1pre3/users/current" 2>&1)
+    HTTP_CODE=\$(echo "\$AUTH_TEST" | tail -n1)
+    RESPONSE_BODY=\$(echo "\$AUTH_TEST" | sed '\$d')
     
-    # If that doesn't work, try with --access-token flag (if supported)
-    if [ \$WHOAMI_EXIT -ne 0 ]; then
-        echo "Trying with --access-token flag..."
-        WHOAMI_OUTPUT=\$(bs --access-token "\$BASESPACE_API_KEY" auth whoami 2>&1)
-        WHOAMI_EXIT=\$?
-    fi
-    
-    if [ \$WHOAMI_EXIT -ne 0 ]; then
-        echo "ERROR: BaseSpace authentication failed (exit code: \$WHOAMI_EXIT)"
-        echo "Error output:"
-        echo "\$WHOAMI_OUTPUT"
+    if [ "\$HTTP_CODE" != "200" ]; then
+        echo "ERROR: BaseSpace authentication failed (HTTP code: \$HTTP_CODE)"
+        echo "Response: \$RESPONSE_BODY"
         echo ""
         echo "Debugging information:"
         echo "API key is set: \${BASESPACE_API_KEY:+YES}"
         echo "API key length: \${#BASESPACE_API_KEY} characters"
-        echo "API key format check (should start with alphanumeric):"
-        echo "\${BASESPACE_API_KEY:0:20}..."
+        echo "API key preview (first 20 chars): \${BASESPACE_API_KEY:0:20}..."
         echo ""
         echo "Please verify:"
         echo "  1. The API key in Secret Manager is valid"
@@ -226,61 +219,90 @@ process TRANSFER_BS_TO_GCS {
         echo "  3. The API key has necessary permissions"
         exit 1
     fi
+    
+    USER_INFO=\$(echo "\$RESPONSE_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(f\"User: {data.get('Response', {}).get('DisplayName', 'Unknown')} (ID: {data.get('Response', {}).get('Id', 'Unknown')})\")" 2>/dev/null || echo "Authentication successful")
     echo "✓ BaseSpace authentication successful"
-    echo "User info: \$WHOAMI_OUTPUT"
+    echo "\$USER_INFO"
     echo ""
     
-    # Download the file from BaseSpace using the BaseSpace CLI
+    # Download the file from BaseSpace using REST API
     echo "=== BaseSpace File Operations ==="
     echo "BaseSpace file ID: $bs_file_id"
     echo "Target GCS path: $gcs_output_uri"
     echo ""
     
-    # Get the file name from the BaseSpace metadata
+    # Get the file metadata from BaseSpace REST API
     echo "Retrieving file metadata from BaseSpace..."
-    FILE_METADATA_OUTPUT=\$(bs file get -i $bs_file_id --template '{{.Name}}' 2>&1)
-    FILE_METADATA_EXIT=\$?
+    FILE_METADATA_RESPONSE=\$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer \$BASESPACE_API_KEY" \
+        "https://api.basespace.illumina.com/v1pre3/files/$bs_file_id" 2>&1)
+    FILE_HTTP_CODE=\$(echo "\$FILE_METADATA_RESPONSE" | tail -n1)
+    FILE_RESPONSE_BODY=\$(echo "\$FILE_METADATA_RESPONSE" | sed '\$d')
     
-    if [ \$FILE_METADATA_EXIT -ne 0 ]; then
-        echo "ERROR: Failed to get file metadata (exit code: \$FILE_METADATA_EXIT)"
-        echo "Error output:"
-        echo "\$FILE_METADATA_OUTPUT"
+    if [ "\$FILE_HTTP_CODE" != "200" ]; then
+        echo "ERROR: Failed to get file metadata (HTTP code: \$FILE_HTTP_CODE)"
+        echo "Response: \$FILE_RESPONSE_BODY"
         echo ""
         echo "The file may not exist or you may not have access to it"
         echo "File ID: $bs_file_id"
         exit 1
     fi
     
-    if [ -z "\$FILE_METADATA_OUTPUT" ]; then
-        echo "ERROR: File metadata returned empty"
+    # Extract file name from JSON response
+    local_filename=\$(echo "\$FILE_RESPONSE_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('Response', {}).get('Name', ''))" 2>/dev/null)
+    
+    if [ -z "\$local_filename" ]; then
+        echo "ERROR: File metadata returned empty or invalid"
+        echo "Response: \$FILE_RESPONSE_BODY"
         echo "File ID: $bs_file_id"
         exit 1
     fi
     
-    local_filename="\$FILE_METADATA_OUTPUT"
     echo "✓ File metadata retrieved"
     echo "File name: \$local_filename"
+    echo ""
+    
+    # Get the download URL for the file
+    echo "Getting download URL for file..."
+    DOWNLOAD_URL_RESPONSE=\$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer \$BASESPACE_API_KEY" \
+        "https://api.basespace.illumina.com/v1pre3/files/$bs_file_id/content" 2>&1)
+    DOWNLOAD_URL_HTTP_CODE=\$(echo "\$DOWNLOAD_URL_RESPONSE" | tail -n1)
+    DOWNLOAD_URL_BODY=\$(echo "\$DOWNLOAD_URL_RESPONSE" | sed '\$d')
+    
+    if [ "\$DOWNLOAD_URL_HTTP_CODE" != "200" ]; then
+        echo "ERROR: Failed to get download URL (HTTP code: \$DOWNLOAD_URL_HTTP_CODE)"
+        echo "Response: \$DOWNLOAD_URL_BODY"
+        exit 1
+    fi
+    
+    # Extract download URL from JSON response
+    DOWNLOAD_URL=\$(echo "\$DOWNLOAD_URL_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('Response', {}).get('HrefContent', ''))" 2>/dev/null)
+    
+    if [ -z "\$DOWNLOAD_URL" ]; then
+        echo "ERROR: Download URL not found in response"
+        echo "Response: \$DOWNLOAD_URL_BODY"
+        exit 1
+    fi
+    
+    echo "✓ Download URL retrieved"
     echo ""
     
     # Download the file from BaseSpace
     echo "Downloading file from BaseSpace..."
     echo "File ID: $bs_file_id"
+    echo "Output file: \$local_filename"
     echo "Output directory: \$(pwd)"
     
-    DOWNLOAD_OUTPUT=\$(bs download file -i $bs_file_id --output ./ 2>&1)
-    DOWNLOAD_EXIT=\$?
+    DOWNLOAD_EXIT=0
+    curl -L -H "Authorization: Bearer \$BASESPACE_API_KEY" -o "\$local_filename" "\$DOWNLOAD_URL" 2>&1 || DOWNLOAD_EXIT=\$?
     
     if [ \$DOWNLOAD_EXIT -ne 0 ]; then
         echo "ERROR: BaseSpace file download failed (exit code: \$DOWNLOAD_EXIT)"
-        echo "Error output:"
-        echo "\$DOWNLOAD_OUTPUT"
-        echo ""
+        echo "Download URL: \$DOWNLOAD_URL"
         echo "File ID: $bs_file_id"
         echo "Expected filename: \$local_filename"
         exit 1
     fi
-    echo "✓ Download command completed"
-    echo "Download output: \$DOWNLOAD_OUTPUT"
+    echo "✓ Download completed"
     echo ""
     
     # Verify file was downloaded
