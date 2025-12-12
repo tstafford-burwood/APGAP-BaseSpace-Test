@@ -170,14 +170,25 @@ process TRANSFER_BS_TO_GCS {
         exit 1
     fi
     
-    BASESPACE_API_KEY="\$SECRET_OUTPUT"
+    # Clean the secret value (remove leading/trailing whitespace and newlines)
+    BASESPACE_API_KEY=\$(echo "\$SECRET_OUTPUT" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     echo "✓ Secret retrieved successfully (length: \${#BASESPACE_API_KEY} characters)"
     echo ""
+    
+    # Validate API key is not empty after cleaning
+    if [ -z "\$BASESPACE_API_KEY" ]; then
+        echo "ERROR: API key is empty after cleaning"
+        echo "Original secret length: \${#SECRET_OUTPUT} characters"
+        exit 1
+    fi
     
     # Export API key as environment variable (BaseSpace CLI will use it automatically)
     echo "=== Setting BaseSpace API Key ==="
     export BASESPACE_API_KEY="\$BASESPACE_API_KEY"
+    # Also set as ACCESS_TOKEN (some CLI versions use this)
+    export BASESPACE_ACCESS_TOKEN="\$BASESPACE_API_KEY"
     echo "✓ BASESPACE_API_KEY environment variable set"
+    echo "✓ BASESPACE_ACCESS_TOKEN environment variable set (for compatibility)"
     echo "Key length: \${#BASESPACE_API_KEY} characters"
     echo "Key preview (first 10 chars): \${BASESPACE_API_KEY:0:10}..."
     echo ""
@@ -185,8 +196,17 @@ process TRANSFER_BS_TO_GCS {
     # Verify BaseSpace authentication
     echo "=== Verifying BaseSpace Authentication ==="
     echo "Testing BaseSpace API key..."
+    
+    # Try with environment variable first (most common method)
     WHOAMI_OUTPUT=\$(bs auth whoami 2>&1)
     WHOAMI_EXIT=\$?
+    
+    # If that doesn't work, try with --access-token flag (if supported)
+    if [ \$WHOAMI_EXIT -ne 0 ]; then
+        echo "Trying with --access-token flag..."
+        WHOAMI_OUTPUT=\$(bs --access-token "\$BASESPACE_API_KEY" auth whoami 2>&1)
+        WHOAMI_EXIT=\$?
+    fi
     
     if [ \$WHOAMI_EXIT -ne 0 ]; then
         echo "ERROR: BaseSpace authentication failed (exit code: \$WHOAMI_EXIT)"
@@ -196,7 +216,13 @@ process TRANSFER_BS_TO_GCS {
         echo "Debugging information:"
         echo "API key is set: \${BASESPACE_API_KEY:+YES}"
         echo "API key length: \${#BASESPACE_API_KEY} characters"
-        echo "Please verify the API key is valid and has necessary permissions"
+        echo "API key format check (should start with alphanumeric):"
+        echo "\${BASESPACE_API_KEY:0:20}..."
+        echo ""
+        echo "Please verify:"
+        echo "  1. The API key in Secret Manager is valid"
+        echo "  2. The API key has not expired"
+        echo "  3. The API key has necessary permissions"
         exit 1
     fi
     echo "✓ BaseSpace authentication successful"
