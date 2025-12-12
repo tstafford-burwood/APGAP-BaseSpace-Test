@@ -1,3 +1,8 @@
+# Alternative Dockerfile - Using Debian Base (Recommended)
+
+If the Google Cloud SDK base image continues to have GPG issues, use this alternative Dockerfile that builds from a clean Debian base:
+
+```dockerfile
 FROM debian:bullseye-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -32,3 +37,13 @@ RUN bs --version && \
     gcloud --version && \
     gsutil version && \
     ps --version
+```
+
+This approach:
+- ✅ Uses a clean Debian base (no GPG issues)
+- ✅ Installs Google Cloud SDK properly
+- ✅ Installs all required packages
+- ✅ Avoids all GPG signature problems
+
+Save this as `Dockerfile.alternative` and use it if the current one continues to fail.
+
