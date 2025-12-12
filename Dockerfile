@@ -1,34 +1,33 @@
-FROM debian:bullseye-slim
+FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:stable
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install Google Cloud SDK and dependencies
+# 1. Install Dependencies for BaseSpace CLI
+# The BaseSpace CLI is typically a Python or shell script that requires 
+# some standard Linux utilities. We'll use 'wget' to download the script.
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
-        gnupg \
-        wget \
-        unzip \
-        python3 \
-        procps && \
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
-        tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-        apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
-    apt-get update -y && \
-    apt-get install -y google-cloud-cli && \
-    apt-get clean && \
+    wget \
+    unzip \
+    ca-certificates \
+    curl \
+    python3 \
+    procps \
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install BaseSpace CLI
+# Install the BaseSpace CLI (`bs`)
 ENV BASESPACE_CLI_VERSION=latest
+
+# Download, rename, and set permissions for the BaseSpace CLI
 RUN wget "https://launch.basespace.illumina.com/CLI/${BASESPACE_CLI_VERSION}/amd64-linux/bs" \
     -O /usr/local/bin/bs && \
     chmod +x /usr/local/bin/bs
 
-# Verification
-RUN bs --version && \
-    gcloud --version && \
-    gsutil version && \
-    ps --version
+# 3. Verification
+# Ensure both CLIs are available for the Nextflow process
+RUN bs --version
+RUN gcloud --version
+RUN gsutil version
+RUN ps --version
+
+# Set the entrypoint or default command if needed, but for Nextflow, 
+# the `nextflow.config` process command will override the entrypoint.
