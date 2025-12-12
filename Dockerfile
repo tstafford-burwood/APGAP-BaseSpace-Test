@@ -3,8 +3,10 @@ FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:stable
 # 1. Install Dependencies for BaseSpace CLI
 # The BaseSpace CLI is typically a Python or shell script that requires 
 # some standard Linux utilities. We'll use 'wget' to download the script.
-RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends \
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get update -y --allow-insecure-repositories && \
+    apt-get install -y --no-install-recommends --allow-unauthenticated \
     wget \
     unzip \
     ca-certificates \
