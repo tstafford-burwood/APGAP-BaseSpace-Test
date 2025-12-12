@@ -76,19 +76,34 @@ process TRANSFER_BS_TO_GCS {
     
     # Check GCP authentication
     echo "=== Checking GCP Authentication ==="
-    echo "Testing gcloud authentication..."
-    if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" &> /dev/null; then
-        echo "WARNING: No active gcloud authentication found"
-        echo "Attempting to use application default credentials..."
-        gcloud auth application-default print-access-token &> /dev/null || {
+    echo "Configuring gcloud to use Application Default Credentials..."
+    
+    # In compute environments, use Application Default Credentials (ADC)
+    # Set the project explicitly
+    gcloud config set project "${params.gcp_project}" 2>&1 || true
+    
+    # Verify ADC is available
+    echo "Testing Application Default Credentials..."
+    if ! gcloud auth application-default print-access-token &> /dev/null; then
+        echo "WARNING: Application Default Credentials not available"
+        echo "Attempting to use service account from metadata server..."
+        
+        # Try to get service account from metadata server (GCP compute environments)
+        SERVICE_ACCOUNT=\$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email 2>/dev/null || echo "")
+        
+        if [ -n "\$SERVICE_ACCOUNT" ]; then
+            echo "✓ Found service account from metadata: \$SERVICE_ACCOUNT"
+            echo "Using service account authentication..."
+        else
             echo "ERROR: No GCP authentication available"
-            echo "Available accounts:"
-            gcloud auth list || true
+            echo "This compute environment may not have a service account configured"
             exit 1
-        }
+        fi
     else
-        ACTIVE_ACCOUNT=\$(gcloud auth list --filter=status:ACTIVE --format="value(account)" | head -n1)
-        echo "✓ Active GCP account: \$ACTIVE_ACCOUNT"
+        echo "✓ Application Default Credentials available"
+        # Get the account being used
+        ACTIVE_ACCOUNT=\$(gcloud auth application-default print-access-token 2>&1 | head -n1 || echo "ADC")
+        echo "Using Application Default Credentials"
     fi
     echo ""
     
@@ -102,11 +117,18 @@ process TRANSFER_BS_TO_GCS {
     echo "Testing secret access..."
     if ! gcloud secrets describe "${params.basespace_secret_name}" --project="${params.gcp_project}" &> /dev/null; then
         echo "ERROR: Cannot access secret '${params.basespace_secret_name}'"
-        echo "Checking secret permissions..."
-        gcloud secrets get-iam-policy "${params.basespace_secret_name}" --project="${params.gcp_project}" || true
         echo ""
-        echo "Attempting to list available secrets..."
-        gcloud secrets list --project="${params.gcp_project}" || true
+        echo "Troubleshooting information:"
+        echo "- Project: ${params.gcp_project}"
+        echo "- Secret name: ${params.basespace_secret_name}"
+        echo ""
+        echo "Attempting to list available secrets (to verify permissions)..."
+        gcloud secrets list --project="${params.gcp_project}" 2>&1 || {
+            echo "Cannot list secrets - this indicates a permission issue"
+            echo "Please ensure the compute environment's service account has:"
+            echo "  - roles/secretmanager.secretAccessor (for the specific secret)"
+            echo "  - roles/secretmanager.viewer (to list secrets)"
+        }
         exit 1
     fi
     echo "✓ Secret exists and is accessible"
@@ -128,14 +150,14 @@ process TRANSFER_BS_TO_GCS {
         echo "\$SECRET_OUTPUT"
         echo ""
         echo "Debugging information:"
-        echo "Current service account:"
-        gcloud config get-value account 2>&1 || echo "No account configured"
+        echo "Current service account (from metadata server):"
+        curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email 2>&1 || echo "Not available via metadata server"
         echo ""
         echo "Project configuration:"
         gcloud config get-value project 2>&1 || echo "No project configured"
         echo ""
-        echo "Checking IAM permissions..."
-        gcloud projects get-iam-policy "${params.gcp_project}" --flatten="bindings[].members" --filter="bindings.members:*\$(gcloud config get-value account 2>&1 || echo 'serviceAccount')" --format="table(bindings.role)" || true
+        echo "Application Default Credentials status:"
+        gcloud auth application-default print-access-token &> /dev/null && echo "ADC is available" || echo "ADC is not available"
         exit 1
     fi
     
