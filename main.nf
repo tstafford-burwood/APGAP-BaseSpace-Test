@@ -198,9 +198,13 @@ process TRANSFER_BS_TO_GCS {
     echo "=== Verifying BaseSpace Authentication ==="
     echo "Testing BaseSpace API key with REST API..."
     
-    # Test authentication by calling the current user endpoint
-    AUTH_TEST=\$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer \$BASESPACE_API_KEY" \
-        "https://api.basespace.illumina.com/v1pre3/users/current" 2>&1)
+    # BaseSpace API requires API key as query parameter, not Bearer token
+    # URL encode the API key for safety
+    ENCODED_API_KEY=\$(python3 -c "import urllib.parse; print(urllib.parse.quote('\$BASESPACE_API_KEY'))" 2>/dev/null || echo "\$BASESPACE_API_KEY")
+    
+    # Test authentication by calling the current user endpoint with API key as query parameter
+    AUTH_TEST=\$(curl -s -w "\n%{http_code}" \
+        "https://api.basespace.illumina.com/v1pre3/users/current?access_token=\$ENCODED_API_KEY" 2>&1)
     HTTP_CODE=\$(echo "\$AUTH_TEST" | tail -n1)
     RESPONSE_BODY=\$(echo "\$AUTH_TEST" | sed '\$d')
     
@@ -233,8 +237,8 @@ process TRANSFER_BS_TO_GCS {
     
     # Get the file metadata from BaseSpace REST API
     echo "Retrieving file metadata from BaseSpace..."
-    FILE_METADATA_RESPONSE=\$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer \$BASESPACE_API_KEY" \
-        "https://api.basespace.illumina.com/v1pre3/files/$bs_file_id" 2>&1)
+    FILE_METADATA_RESPONSE=\$(curl -s -w "\n%{http_code}" \
+        "https://api.basespace.illumina.com/v1pre3/files/$bs_file_id?access_token=\$ENCODED_API_KEY" 2>&1)
     FILE_HTTP_CODE=\$(echo "\$FILE_METADATA_RESPONSE" | tail -n1)
     FILE_RESPONSE_BODY=\$(echo "\$FILE_METADATA_RESPONSE" | sed '\$d')
     
@@ -263,8 +267,8 @@ process TRANSFER_BS_TO_GCS {
     
     # Get the download URL for the file
     echo "Getting download URL for file..."
-    DOWNLOAD_URL_RESPONSE=\$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer \$BASESPACE_API_KEY" \
-        "https://api.basespace.illumina.com/v1pre3/files/$bs_file_id/content" 2>&1)
+    DOWNLOAD_URL_RESPONSE=\$(curl -s -w "\n%{http_code}" \
+        "https://api.basespace.illumina.com/v1pre3/files/$bs_file_id/content?access_token=\$ENCODED_API_KEY" 2>&1)
     DOWNLOAD_URL_HTTP_CODE=\$(echo "\$DOWNLOAD_URL_RESPONSE" | tail -n1)
     DOWNLOAD_URL_BODY=\$(echo "\$DOWNLOAD_URL_RESPONSE" | sed '\$d')
     
@@ -293,7 +297,20 @@ process TRANSFER_BS_TO_GCS {
     echo "Output directory: \$(pwd)"
     
     DOWNLOAD_EXIT=0
-    curl -L -H "Authorization: Bearer \$BASESPACE_API_KEY" -o "\$local_filename" "\$DOWNLOAD_URL" 2>&1 || DOWNLOAD_EXIT=\$?
+    # BaseSpace download URLs typically already include authentication in the signed URL
+    # If the URL doesn't have access_token, add it
+    if echo "\$DOWNLOAD_URL" | grep -q "access_token"; then
+        # URL already has access_token, use as-is
+        curl -L -o "\$local_filename" "\$DOWNLOAD_URL" 2>&1 || DOWNLOAD_EXIT=\$?
+    else
+        # Add access_token to download URL (check if URL already has query params)
+        if echo "\$DOWNLOAD_URL" | grep -q "?"; then
+            DOWNLOAD_URL_WITH_AUTH="\${DOWNLOAD_URL}&access_token=\$ENCODED_API_KEY"
+        else
+            DOWNLOAD_URL_WITH_AUTH="\${DOWNLOAD_URL}?access_token=\$ENCODED_API_KEY"
+        fi
+        curl -L -o "\$local_filename" "\$DOWNLOAD_URL_WITH_AUTH" 2>&1 || DOWNLOAD_EXIT=\$?
+    fi
     
     if [ \$DOWNLOAD_EXIT -ne 0 ]; then
         echo "ERROR: BaseSpace file download failed (exit code: \$DOWNLOAD_EXIT)"
